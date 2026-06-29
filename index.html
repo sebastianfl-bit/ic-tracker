@@ -199,7 +199,7 @@ body {
     <div class="photo-btn" id="photo-btn" onclick="document.getElementById('file-input').click()">
       📷 Tomar / elegir foto de la hoja
     </div>
-    <input type="file" id="file-input" accept="image/*" onchange="handlePhoto(event)" style="display:none">
+    <input type="file" id="file-input" accept="image/*,application/pdf" onchange="handlePhoto(event)" style="display:none">
     <div id="ocr-status" class="ocr-status hidden"><div class="spinner"></div><span>Extrayendo datos...</span></div>
     <div id="thumb-wrap" class="thumb-wrap hidden"><img id="thumb-img" src="" alt=""></div>
 
@@ -410,31 +410,49 @@ function compressImage(file) {
   });
 }
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result.split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
 async function handlePhoto(e) {
   const file = e.target.files?.[0];
   if (!file) return;
   const apiKey = getApiKey();
   if (!apiKey) { alert("Configura tu API Key de Gemini primero (⚙)"); return; }
 
+  const isPdf = file.type === "application/pdf";
+
   document.getElementById("ocr-status").classList.remove("hidden");
-  document.getElementById("photo-btn").textContent = "Leyendo foto...";
+  document.getElementById("photo-btn").textContent = isPdf ? "Leyendo PDF..." : "Leyendo foto...";
 
   try {
-    const b64 = await compressImage(file);
-    // Show thumbnail
-    document.getElementById("thumb-img").src = "data:image/jpeg;base64," + b64;
-    document.getElementById("thumb-wrap").classList.remove("hidden");
+    let b64, mimeType;
+    if (isPdf) {
+      b64 = await fileToBase64(file);
+      mimeType = "application/pdf";
+      document.getElementById("thumb-wrap").classList.add("hidden");
+    } else {
+      b64 = await compressImage(file);
+      mimeType = "image/jpeg";
+      document.getElementById("thumb-img").src = "data:image/jpeg;base64," + b64;
+      document.getElementById("thumb-wrap").classList.remove("hidden");
+    }
 
     // OCR via Gemini
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [
-            { inline_data: { mime_type: "image/jpeg", data: b64 } },
-            { text: 'Esta es una foto de una hoja de solicitud de interconsulta de urgencia de Clínica Alemana de Santiago. Extrae estos datos y responde ÚNICAMENTE con JSON sin backticks ni texto adicional:\n{"nombre": "NOMBRE COMPLETO DEL PACIENTE", "rut": "XX.XXX.XXX-X", "fecha": "YYYY-MM-DD", "hora": "HH:MM"}\nBusca nombre y RUT en el recuadro "Paciente". Fecha y hora en "Fecha y Hora" al pie o esquina superior derecha. Formato YYYY-MM-DD y HH:MM (24h). Si no encuentras un campo pon "".' }
+            { inline_data: { mime_type: mimeType, data: b64 } },
+            { text: 'Esta es una hoja de solicitud de interconsulta de urgencia de Clínica Alemana de Santiago. Extrae estos datos y responde ÚNICAMENTE con JSON sin backticks ni texto adicional:\n{"nombre": "NOMBRE COMPLETO DEL PACIENTE", "rut": "XX.XXX.XXX-X", "fecha": "YYYY-MM-DD", "hora": "HH:MM"}\nBusca nombre y RUT en el recuadro "Paciente". Fecha y hora en "Fecha y Hora" al pie o esquina superior derecha. Formato YYYY-MM-DD y HH:MM (24h). Si no encuentras un campo pon "".' }
           ]}]
         })
       }
@@ -610,33 +628,20 @@ async function handleSync() {
   try {
     const res = await fetch(scriptUrl, {
       method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ month: monthLabel, records }),
-      mode: "no-cors"
-    });
-    
-    // no-cors means we can't read the response, but the request goes through
-    // Try with redirect approach for actual response
-    const res2 = await fetch(scriptUrl, {
-      method: "POST",
       body: JSON.stringify({ month: monthLabel, records }),
       redirect: "follow"
-    }).catch(() => null);
-    
-    let result = null;
-    if (res2) {
-      try { result = await res2.json(); } catch { /* ok */ }
-    }
-    
+    });
+
+    const result = await res.json();
+
     if (result?.success) {
       statusEl.innerHTML = `<div class="status status-ok">✓ ${result.message}${result.url ? `<a href="${result.url}" target="_blank">Abrir en Sheets →</a>` : ''}</div>`;
     } else {
-      // If we can't read response (CORS), assume success since request was sent
-      statusEl.innerHTML = `<div class="status status-ok">✓ Datos enviados a Google Sheets (${records.length} registros de ${monthLabel})</div>`;
+      statusEl.innerHTML = `<div class="status status-err">✕ ${result?.message || 'El script respondió pero sin confirmar éxito'}</div>`;
     }
   } catch (err) {
     console.error("Sync error:", err);
-    statusEl.innerHTML = `<div class="status status-err">✕ Error: ${err.message}. Verifica la URL del Apps Script.</div>`;
+    statusEl.innerHTML = `<div class="status status-err">✕ Error: ${err.message}. Verifica la URL del Apps Script y que esté implementado con acceso "Cualquier persona".</div>`;
   }
   
   btn.disabled = false; btn.textContent = "📤 Sync a Sheets";
