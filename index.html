@@ -199,7 +199,7 @@ body {
     <div class="photo-btn" id="photo-btn" onclick="document.getElementById('file-input').click()">
       📷 Tomar / elegir foto de la hoja
     </div>
-    <input type="file" id="file-input" accept="image/*" capture="environment" onchange="handlePhoto(event)" style="display:none">
+    <input type="file" id="file-input" accept="image/*" onchange="handlePhoto(event)" style="display:none">
     <div id="ocr-status" class="ocr-status hidden"><div class="spinner"></div><span>Extrayendo datos...</span></div>
     <div id="thumb-wrap" class="thumb-wrap hidden"><img id="thumb-img" src="" alt=""></div>
 
